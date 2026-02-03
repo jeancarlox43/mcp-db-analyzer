@@ -1,0 +1,81 @@
+services:
+  # MCP Server principal
+  mcp-db-analyzer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mcp-db-analyzer
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@db:5432/analytics}
+      - OUTPUT_DIR=/app/outputs
+    volumes:
+      - ./outputs:/app/outputs
+      - ./src:/app/src:ro # Mount para desarrollo
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - mcp-network
+    # Para modo stdio (Claude Desktop)
+    stdin_open: true
+    tty: true
+
+  # MCP Server con SSE transport (para acceso remoto)
+  mcp-db-analyzer-sse:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mcp-db-analyzer-sse
+    command: [ "python", "-m", "src.server", "--transport", "sse", "--port", "8000" ]
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@db:5432/analytics}
+      - OUTPUT_DIR=/app/outputs
+    volumes:
+      - ./outputs:/app/outputs
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - mcp-network
+
+  # Base de datos PostgreSQL (para desarrollo/testing)
+  db:
+    image: postgres:15-alpine
+    container_name: mcp-postgres
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=analytics
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5432:5432"
+    networks:
+      - mcp-network
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Adminer para gestión visual de BD (opcional)
+  adminer:
+    image: adminer:latest
+    container_name: mcp-adminer
+    ports:
+      - "8080:8080"
+    networks:
+      - mcp-network
+    depends_on:
+      - db
+
+volumes:
+  postgres_data:
+
+
+networks:
+  mcp-network:
+    driver: bridge
